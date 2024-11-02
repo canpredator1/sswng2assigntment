@@ -1,6 +1,7 @@
 package ie.tcd.scss.countryinfo.service;
 
 import ie.tcd.scss.countryinfo.domain.Country;
+import ie.tcd.scss.countryinfo.domain.Currency;
 import ie.tcd.scss.countryinfo.domain.Translation;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -66,8 +67,8 @@ public class CountryService {
             return Stream.of(countries) // convert to Stream
 
                     // TODO: in getNamesMostPopulousCountries implement filter and sort
-                    // filter by substring, case-insensitive
-                    // sort by population, descending
+                    .filter(country -> country.getName().getCommon().toLowerCase().contains(substring.toLowerCase())) // Filter by substring, case-insensitive
+                    .sorted((c1, c2) -> Long.compare(c2.getPopulation(), c1.getPopulation())) // Sort by population, descending
 
                     .map(c -> c.getName().getCommon()) // map country to country name
                     .collect(Collectors.toList()); //
@@ -77,14 +78,17 @@ public class CountryService {
 
     public List<String> getNamesMostPopulousCountriesWithPopulation(String substring) {
 
-        // TODO: Implement getNamesMostPopulousCountriesWithPopulation
-        // Requirements:
-        // - Retrieve all countries from the API
-        // - Filter countries by substring (case-insensitive)
-        // - Sort countries by population (descending)
-        // - Map each country to a string in the format "name (population)"
-        // - Collect the mapped strings into a list and return it
-        return List.of(); // Replace with implementation
+        Country[] countries = restTemplate.getForObject(API_URL_ALL, Country[].class);
+        if (countries == null) {
+            return List.of();
+        }
+
+        // Filter countries by substring (case-insensitive) and sort by population (descending)
+        return Arrays.stream(countries)
+                .filter(country -> country.getName().getCommon().toLowerCase().contains(substring.toLowerCase()))
+                .sorted((c1, c2) -> Long.compare(c2.getPopulation(), c1.getPopulation())) // Sort descending by population
+                .map(country -> String.format("%s (%d)", country.getName().getCommon(), country.getPopulation())) // Map to "name (population)"
+                .collect(Collectors.toList()); // Collect the mapped strings into a list
     }
 
     /**
@@ -168,18 +172,17 @@ public class CountryService {
         Stream<Country> countryStream = Arrays.stream(countries)
                 .filter(country -> region.equalsIgnoreCase(country.getRegion()));
 
-        // TODO: Implement flexible sorting
-        // Requirements:
-        // - If sortBy is "population", sort by population (descending)
-        // - If sortBy is "name", sort by common name (ascending)
-        // - If sortBy is "area", sort by area (descending)
-        // - If sortBy is null or invalid, return unsorted
-        // - Use Java streams API for sorting
-        // - Handle null values in sorting fields
+        if ("population".equalsIgnoreCase(sortBy)) {
+            countryStream = countryStream.sorted((c1, c2) -> Long.compare(c2.getPopulation(), c1.getPopulation())); // Sort by population, descending
+        } else if ("name".equalsIgnoreCase(sortBy)) {
+            countryStream = countryStream.sorted(Comparator.comparing(c -> c.getName().getCommon(), String.CASE_INSENSITIVE_ORDER)); // Sort by name, ascending
+        } else if ("area".equalsIgnoreCase(sortBy)) {
+            countryStream = countryStream.sorted((c1, c2) -> Double.compare(c2.getArea(), c1.getArea())); // Sort by area, descending
+        }
 
+        // Collect and return the sorted (or unsorted) list of countries
         return countryStream.collect(Collectors.toList());
     }
-
     /**
      * Calculates statistics for a given region, including the total population, total area, average population density,
      * and the most common languages and currencies.
@@ -219,22 +222,57 @@ public class CountryService {
      */
     public Map<String, Object> calculateRegionStatistics(String region) {
         List<Country> countries = getCountriesByRegion(region, null);
-
         logger.debug("Calculating statistics for region: {}", region);
 
-        // TODO: Calculate regional statistics
-        // Requirements:
-        // - Calculate total population for the region
-        // - Calculate total area for the region
-        // - Calculate average population density (total population / total area)
-        // - Find the most common languages (top 5) and their counts
-        // - Find the most common currencies (top 5) and their counts
-        // Return these in a Map<String, Object> with keys:
-        // "totalPopulation", "totalArea", "averagePopulationDensity",
-        // "mostCommonLanguages", "mostCommonCurrencies"
+        Map<String, Object> result = new HashMap<>();
+        double totalPopulation = 0.0;
+        double totalArea = 0.0;
 
-        return Map.of();
+        // Calculate total population and total area
+        for (Country country : countries) {
+            totalPopulation += country.getPopulation();
+            totalArea += country.getArea();
+        }
+
+        double averagePopulationDensity = totalPopulation / totalArea;
+        result.put("totalPopulation", totalPopulation);
+        result.put("totalArea", totalArea);
+        result.put("averagePopulationDensity", averagePopulationDensity);
+
+        // Calculate frequency of languages
+        Map<String, Long> languageFrequency = new HashMap<>();
+        for (Country country : countries) {
+            Map<String, String> languages = country.getLanguages();
+            if (languages != null) {
+                for (String language : languages.values()) {
+                    languageFrequency.put(language, languageFrequency.getOrDefault(language, 0L) + 1);
+                }
+            }
+        }
+
+        // Get top 5 most common languages using the getTopN method
+        Map<String, Long> topLanguages = getTopN(languageFrequency, 5);
+        result.put("mostCommonLanguages", topLanguages);
+
+        // Calculate frequency of currencies
+        Map<String, Long> currencyFrequency = new HashMap<>();
+        for (Country country : countries) {
+            Map<String, Currency> currencies = country.getCurrencies();
+            if (currencies != null) {
+                for (String currencyCode : currencies.keySet()) {
+                    currencyFrequency.put(currencyCode, currencyFrequency.getOrDefault(currencyCode, 0L) + 1);
+                }
+            }
+        }
+
+        // Get top 5 most common currencies using the getTopN method
+        Map<String, Long> topCurrencies = getTopN(currencyFrequency, 5);
+        result.put("mostCommonCurrencies", topCurrencies);
+
+        return result;
     }
+
+
 
     /**
      * Compares two countries based on population, area, languages, and borders.
@@ -251,25 +289,47 @@ public class CountryService {
     public Map<String, Object> compareCountries(String country1Name, String country2Name) {
         logger.debug("Comparing countries: {} and {}", country1Name, country2Name);
 
-        // TODO: Implement country comparison
-        // Requirements:
-     double x  = (double)getCountryInfo(country1Name).getPopulation();
-        double x1  = (double)getCountryInfo(country2Name).getPopulation();
-       double result =x/x1;
-        double y = (double)getCountryInfo(country1Name).getPopulation();
-        double y1 = (double)getCountryInfo(country2Name).getPopulation();
-        double result1 =y/y1;
-        String c;
+        // Initialize the map to store the results
+        Map<String, Object> comparisonResults = new HashMap<>();
+
+        // Retrieve population of both countries and calculate the population ratio
+        double population1 = (double) getCountryInfo(country1Name).getPopulation();
+        double population2 = (double) getCountryInfo(country2Name).getPopulation();
+        double populationRatio = population1 / population2;
+        comparisonResults.put("populationRatio", populationRatio);
+
+        // Retrieve area of both countries and calculate the area ratio
+        double area1 = (double) getCountryInfo(country1Name).getArea();
+        double area2 = (double) getCountryInfo(country2Name).getArea();
+        double areaRatio = area1 / area2;
+        comparisonResults.put("areaRatio", areaRatio);
+
+        // Retrieve and compare languages
         Map<String, String> lan1 = getCountryInfo(country1Name).getLanguages();
-        String language1 = String.join(", ",lan1.values());
-
         Map<String, String> lan2 = getCountryInfo(country2Name).getLanguages();
-        String language2 = String.join(", ",lan2.values());
+        List<String> sharedLanguages = new ArrayList<>();
+        if (lan1 != null && lan2 != null) {
+            Set<String> languagesSet1 = new HashSet<>(lan1.values());
+            Set<String> languagesSet2 = new HashSet<>(lan2.values());
+            languagesSet1.retainAll(languagesSet2); // Retain only common languages
+            sharedLanguages.addAll(languagesSet1);
+        }
+        comparisonResults.put("sharedLanguages", sharedLanguages);
 
-      
+        // Retrieve and compare borders to determine if countries share a border
+        List<String> borders1 = getCountryInfo(country1Name).getBorders();
+        List<String> borders2 = getCountryInfo(country2Name).getBorders();
+        boolean directlyBordering = false;
+        if (borders1 != null && borders2 != null) {
+            Set<String> borderSet1 = new HashSet<>(borders1);
+            borderSet1.retainAll(borders2); // Check for any common borders
+            directlyBordering = !borderSet1.isEmpty();
+        }
+        comparisonResults.put("directlyBordering", directlyBordering);
 
-
-
+        // Return the comparison results
+        return comparisonResults;
+    }
         // - Calculate population ratio (population of country1 / population of country2)
         // - Calculate area ratio (area of country1 / area of country2)
         // - Find shared languages between the countries
@@ -278,8 +338,7 @@ public class CountryService {
         // Return results in a Map with keys: "populationRatio", "areaRatio",
         // "sharedLanguages", "directlyBordering"
 
-        return Map.of(); // Replace with implementation
-    }
+
 
     /**
      * Returns the top N entries from a map, sorted by value in descending order.
